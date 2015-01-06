@@ -6,14 +6,37 @@ import sys
 import argparse
 import requesocks
 import multiprocessing
+import extraction
+import random
 
-testUrl="http://whatismyipaddress.com/"
+timeoutTime=10
+numThreads=35
 resultList=[]
 proxyList=[]
 
 socks4List=[]
 socks5List=[]
 httpList=[]
+
+textFormat = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<ProxifierProfile version="101" platform="Windows" product_id="0" product_minver="310">
+  <Options>
+    <Resolve>
+      <AutoModeDetection enabled="true" />
+      <ViaProxy enabled="false">
+        <TryLocalDnsFirst enabled="false" />
+      </ViaProxy>
+      <ExclusionList>%ComputerName%; localhost; *.local</ExclusionList>
+    </Resolve>
+    <Encryption mode="disabled" />
+    <HttpProxiesSupport enabled="false" />
+    <HandleDirectConnections enabled="false" />
+    <ConnectionLoopDetection enabled="true" />
+    <ProcessServices enabled="false" />
+    <ProcessOtherUsers enabled="false" />
+  </Options>
+  <ProxyList>\n"""
+
 
 def execute1(jobs, num_processes=2):
     	work_queue = multiprocessing.Queue()
@@ -47,7 +70,7 @@ class Worker1(multiprocessing.Process):
             		except:
                 		break
             		(jobid,proxyHost,proxyHost) = job
-            		rtnVal = (jobid,proxyHost,getURL1(proxyHost))
+            		rtnVal = (jobid,proxyHost,getURL1(proxyHost,"get"))
             		self.result_queue.put(rtnVal)
 
 def chunk(input, size):
@@ -67,6 +90,7 @@ def testSocks(proxyHost):
 		result = tempResult
 		return result
 def testSocks4(proxyHost):
+	global timeoutTime
 	#print "Testing socks proxy: http://"+proxyHost
 	import socks
 	import socket
@@ -82,7 +106,7 @@ def testSocks4(proxyHost):
 		if proxyType=="socks4":
 			session.proxies = {'http': 'socks4://'+hostNo+':'+portNo}
 		try:
-			session.timeout = 3
+			session.timeout = timeoutTime
 			r = session.get('http://www.engadget.com/')
 
 			statusCode = str(r.status_code)
@@ -98,6 +122,7 @@ def testSocks4(proxyHost):
 			return proxyHost+"\t"+proxyType+"\t503"
 
 def testSocks5(proxyHost):
+	global timeoutTime
 	#print "Testing socks proxy: http://"+proxyHost
 	import socks
 	import socket
@@ -113,7 +138,7 @@ def testSocks5(proxyHost):
 		if proxyType=="socks5":
 			session.proxies = {'http': 'socks5://'+hostNo+':'+portNo}
 		try:
-			session.timeout = 3
+			session.timeout = timeoutTime
 			r = session.get('http://www.engadget.com/')
 
 			statusCode = str(r.status_code)
@@ -129,7 +154,12 @@ def testSocks5(proxyHost):
 			return proxyHost+"\t"+proxyType+"\t503"
 
 
-def getURL1(proxyHost):
+def getURL1(proxyHost,requestType):
+	global timeoutTime
+	urlList = []
+	urlList.append(["http://www.wikipedia.org/","Wikipedia"])
+	#urlList.append(["http://whatismyipaddress.com/","What Is My IP Address?"])
+
 	proxies = {
 	  "http": "http://"+proxyHost,
 	}
@@ -138,8 +168,23 @@ def getURL1(proxyHost):
 	try:
 		#print "Testing http proxy: http://"+proxyHost	
 		headers = {'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_9_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/39.0.2171.95 Safari/537.36'}
-		r = requests.head("http://whatismyipaddress.com/", proxies=proxies, timeout=3, headers=headers)
+
+		
+		urlPosition = random.choice(urlList)
+		url = urlPosition[0]
+		urlTitle = urlPosition[1]
+
+		#url = "http://whatismyipaddress.com"
+
+		if requestType=="get":
+			r = requests.get(url, proxies=proxies, timeout=timeoutTime, headers=headers)
+			extracted = extraction.Extractor().extract(r.text, source_url=url)
+			if urlTitle not in extracted.title:
+				return proxyHost+"\thttp\t503"			
+		elif requestType=="head":
+			r = requests.head(url, proxies=proxies, timeout=timeoutTime, headers=headers)
 		statusCode=str(r.status_code)
+		#print extracted.title+"\t"+statusCode
 		if statusCode!="200":
 			result = testSocks4(proxyHost)
 			if "503" in str(result):
@@ -168,7 +213,9 @@ def getURL1(proxyHost):
 
 if __name__ == '__main__':
     	parser = argparse.ArgumentParser()
-    	parser.add_argument('-file',dest='ipFile',action='store',help='[file containing list of proxies]')
+    	parser.add_argument('-in',dest='ipFile',action='store',help='[file containing list of proxies]')
+    	parser.add_argument('-out',dest='outFile',action='store',help='[proxifier profile PPX file]')
+    	parser.add_argument('-threads',dest='threads',action='store',help='[number of threads]')
     	parser.add_argument('-time', action='store_true', help='[check latency]')
     	parser.add_argument('-v', action='store_true', help='[verbose mode]')
     	options = parser.parse_args()
@@ -180,8 +227,12 @@ if __name__ == '__main__':
 		with open(options.ipFile) as f:
 			proxyList = f.read().splitlines()
 			proxyList=list(set(proxyList))
+	
+		if options.threads:
+			tempList1 = chunk(proxyList, int(options.threads))
+		else:
+			tempList1 = chunk(proxyList, 35)
 
-		tempList1 = chunk(proxyList, 50)
 		totalCount=len(tempList1)
 		count = 1 
 		for proxyList in tempList1:
@@ -196,7 +247,7 @@ if __name__ == '__main__':
 				except TypeError:
 					continue
 		
-			numProcesses = 50
+			numProcesses = numThreads
 			resultList = execute1(jobs,numProcesses)
 			for result in resultList:
 				if result[2]!=None:
@@ -224,6 +275,10 @@ if __name__ == '__main__':
 			#		print proxyHost+"\thttp\t"+statusCode
 
 		print "\n------------------------------------------------------------------"
+		proxyID=100
+		proxyIDList=[]
+		chainID=""
+
 		if len(socks4List)>0:
 			print "\nWorking Socks4 Proxies"
 			tempList=[]
@@ -231,15 +286,36 @@ if __name__ == '__main__':
 				hostNo =  (x.split("\t"))[0]
 				if options.time:
 					totalTime = timeit.timeit("testSocks4(hostNo)",number=1, setup="from __main__ import testSocks4, hostNo")					
-					print hostNo+"\t"+str(totalTime)
 					tempList.append([hostNo,totalTime])
+
+					proxyHost = (hostNo.split(":"))[0]
+					proxyPort = (hostNo.split(":"))[1]
+
+					textFormat+='\t<Proxy id="'+str(proxyID)+'" type="SOCKS4">\n'
+      					textFormat+='\t\t<Address>'+proxyHost+'</Address>\n'
+					textFormat+='\t\t<Port>'+proxyPort+'</Port>\n'
+      					textFormat+='\t\t<Options>48</Options>\n'
+    					textFormat+='\t</Proxy>\n'
+					proxyIDList.append(str(proxyID))
+
 				else:
 					print hostNo
+
+					proxyHost = (hostNo.split(":"))[0]
+					proxyPort = (hostNo.split(":"))[1]
+
+					textFormat+='\t<Proxy id="'+str(proxyID)+'" type="SOCKS4">\n'
+      					textFormat+='\t\t<Address>'+proxyHost+'</Address>\n'
+					textFormat+='\t\t<Port>'+proxyPort+'</Port>\n'
+      					textFormat+='\t\t<Options>48</Options>\n'
+    					textFormat+='\t</Proxy>\n'
+					proxyIDList.append(str(proxyID))
+				proxyID+=1
 			if options.time:
 				if len(tempList)>0:
 					tempList = sorted(tempList, key=operator.itemgetter(1))
 					for x in tempList:
-						print x[0]+"\t"+str(x[1])
+						print x[0]+"\t"+str(x[1])+" seconds"
 
 		if len(socks5List)>0:
 			print "\nWorking Socks5 Proxies"
@@ -248,15 +324,35 @@ if __name__ == '__main__':
 				hostNo =  (x.split("\t"))[0]
 				if options.time:
 					totalTime = timeit.timeit("testSocks5(hostNo)",number=1, setup="from __main__ import testSocks5, hostNo")					
-					#print hostNo+"\t"+str(totalTime)
-					tempList.append([hostNo,str(totalTime)])
+					tempList.append([hostNo,totalTime])
+
+					proxyHost = (hostNo.split(":"))[0]
+					proxyPort = (hostNo.split(":"))[1]
+
+					textFormat+='\t<Proxy id="'+str(proxyID)+'" type="SOCKS5">\n'
+      					textFormat+='\t\t<Address>'+proxyHost+'</Address>\n'
+					textFormat+='\t\t<Port>'+proxyPort+'</Port>\n'
+      					textFormat+='\t\t<Options>48</Options>\n'
+    					textFormat+='\t</Proxy>\n'
+					proxyIDList.append(str(proxyID))
 				else:
 					print hostNo
+
+					proxyHost = (hostNo.split(":"))[0]
+					proxyPort = (hostNo.split(":"))[1]
+
+					textFormat+='\t<Proxy id="'+str(proxyID)+'" type="SOCKS5">\n'
+      					textFormat+='\t\t<Address>'+proxyHost+'</Address>\n'
+					textFormat+='\t\t<Port>'+proxyPort+'</Port>\n'
+      					textFormat+='\t\t<Options>48</Options>\n'
+    					textFormat+='\t</Proxy>\n'
+					proxyIDList.append(str(proxyID))
+				proxyID+=1
 			if options.time:
 				if len(tempList)>0:
 					tempList = sorted(tempList, key=operator.itemgetter(1))
 					for x in tempList:
-						print x[0]+"\t"+str(x[1])
+						print x[0]+"\t"+str(x[1])+" seconds"
 
 		if len(httpList)>0:
 			print "\nWorking HTTP Proxies"
@@ -264,13 +360,61 @@ if __name__ == '__main__':
 			for x in httpList:
 				hostNo = (x.split("\t"))[0]
 				if options.time:
-					totalTime = timeit.timeit("getURL1(hostNo)",number=1, setup="from __main__ import getURL1, hostNo")
-					#print hostNo+"\t"+str(totalTime)
-					tempList.append((hostNo,str(totalTime)))
+					totalTime = timeit.timeit("getURL1(hostNo,'get')",number=1, setup="from __main__ import getURL1, hostNo")
+					tempList.append([hostNo,totalTime])
+
+					proxyHost = (hostNo.split(":"))[0]
+					proxyPort = (hostNo.split(":"))[1]
+
+					textFormat+='\t<Proxy id="'+str(proxyID)+'" type="HTTPS">\n'
+      					textFormat+='\t\t<Address>'+proxyHost+'</Address>\n'
+					textFormat+='\t\t<Port>'+proxyPort+'</Port>\n'
+      					textFormat+='\t\t<Options>48</Options>\n'
+    					textFormat+='\t</Proxy>\n'
+					proxyIDList.append(str(proxyID))
+
 				else:
 					print hostNo
+
+					proxyHost = (hostNo.split(":"))[0]
+					proxyPort = (hostNo.split(":"))[1]
+
+					textFormat+='\t<Proxy id="'+str(proxyID)+'" type="HTTPS">\n'
+      					textFormat+='\t\t<Address>'+proxyHost+'</Address>\n'
+					textFormat+='\t\t<Port>'+proxyPort+'</Port>\n'
+      					textFormat+='\t\t<Options>48</Options>\n'
+    					textFormat+='\t</Proxy>\n'
+					proxyIDList.append(str(proxyID))
+				proxyID+=1
+
 			if options.time:
 				if len(tempList)>0:
 					tempList = sorted(tempList, key=operator.itemgetter(1))
 					for x in tempList:
-						print x[0]+"\t"+str(x[1])
+						print x[0]+"\t"+str(x[1])+" seconds"
+			textFormat += '</ProxyList>\n'
+			textFormat += '<ChainList>\n'
+   			textFormat += '\t<Chain id="'+str(proxyID)+'" type="load_balancing">\n'
+			chainID = str(proxyID)
+      			textFormat += '\t<Name>Chain1</Name>\n'
+			for x in proxyIDList:
+      				textFormat += '\t<Proxy enabled="true">'+x+'</Proxy>\n'
+    			textFormat += '\t</Chain>\n'
+			textFormat += '</ChainList>\n'
+			textFormat += '<RuleList>\n'
+			textFormat += '\t<Rule enabled="true">\n'
+      			textFormat += '\t\t<Name>Localhost</Name>\n'
+      			textFormat += '\t\t<Targets>localhost; 127.0.0.1; %ComputerName%</Targets>\n'
+      			textFormat += '\t\t<Action type="Chain">'+chainID+'</Action>\n'
+    			textFormat += '\t</Rule>\n'
+    			textFormat += '\t<Rule enabled="true">\n'
+      			textFormat += '\t\t<Name>Default</Name>\n'
+      			textFormat += '\t\t<Action type="Chain">'+chainID+'</Action>\n'
+    			textFormat += '\t</Rule>\n'
+			textFormat += '</RuleList>\n'
+			textFormat += '</ProxifierProfile>'
+			if options.outFile:
+				f = open(options.outFile, 'w')
+				f.write(textFormat)
+				f.close()
+				print "\n[*] "+options.outFile+".ppx written."
