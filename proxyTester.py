@@ -107,7 +107,7 @@ def testSocks4(proxyHost):
 			session.proxies = {'http': 'socks4://'+hostNo+':'+portNo}
 		try:
 			session.timeout = timeoutTime
-			r = session.get('http://www.engadget.com/')
+			r = session.get('http://www.wikipedia.com/')
 
 			statusCode = str(r.status_code)
 
@@ -139,7 +139,7 @@ def testSocks5(proxyHost):
 			session.proxies = {'http': 'socks5://'+hostNo+':'+portNo}
 		try:
 			session.timeout = timeoutTime
-			r = session.get('http://www.engadget.com/')
+			r = session.get('http://www.wikipedia.com/')
 
 			statusCode = str(r.status_code)
 
